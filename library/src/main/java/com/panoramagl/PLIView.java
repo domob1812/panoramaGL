@@ -230,4 +230,11 @@ public interface PLIView {
     boolean isAcceleratedTouchScrollingEnabled();
 
     void setAcceleratedTouchScrollingEnabled(boolean enabled);
+
+    /**
+     * vertical scrolling enabled
+     **/
+    boolean isVerticalScrollingEnabled();
+
+    void setVerticalScrollingEnabled(boolean enabled);
 }

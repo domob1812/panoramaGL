@@ -152,6 +152,7 @@ open class PLActivity : AppCompatActivity(), PLIView, SensorEventListener, Gestu
     private var mListener: PLViewListener? = null
     private var mIsZoomEnabled = false
     private var mIsAcceleratedTouchScrollingEnabled = false
+    private var mIsVerticalScrollingEnabled = true
 
     protected fun initializeValues() {
         isRendererCreated = false
@@ -200,6 +201,7 @@ open class PLActivity : AppCompatActivity(), PLIView, SensorEventListener, Gestu
 
         mIsZoomEnabled = true
         mIsAcceleratedTouchScrollingEnabled = true
+        mIsVerticalScrollingEnabled = true
 
         this.reset()
 
@@ -584,7 +586,15 @@ open class PLActivity : AppCompatActivity(), PLIView, SensorEventListener, Gestu
      */
     protected fun drawView(): Boolean {
         if (isRendererCreated && renderer!!.isRunning && mPanorama != null) {
-            if (!mIsValidForFov) mPanorama!!.camera.rotate(this, mStartPoint, mEndPoint)
+            if (!mIsValidForFov) {
+                if (mIsVerticalScrollingEnabled) {
+                    mPanorama!!.camera.rotate(this, mStartPoint, mEndPoint)
+                } else {
+                    // Only allow horizontal (yaw) rotation, keep pitch unchanged
+                    val adjustedEndPoint = CGPoint.CGPointMake(mEndPoint!!.x, mStartPoint!!.y)
+                    mPanorama!!.camera.rotate(this, mStartPoint, adjustedEndPoint)
+                }
+            }
             mGLSurfaceView!!.requestRender()
             return true
         }
@@ -1041,13 +1051,30 @@ open class PLActivity : AppCompatActivity(), PLIView, SensorEventListener, Gestu
     }
 
     protected fun doGyroUpdate(pitch: Float, yaw: Float) {
-        if (this.isLocked || mIsValidForTouch || mIsValidForScrolling || validForCameraAnimation || mIsValidForTransition || !mHasFirstGyroscopePitch) return
+        if (this.isLocked || validForCameraAnimation || mIsValidForTransition || !mHasFirstGyroscopePitch) return
 
-        mPanorama!!.camera.lookAt(this, pitch, yaw)
+        // When vertical scrolling is enabled, block device orientation during touch/scrolling to prevent conflicts
+        // When vertical scrolling is disabled, allow device pitch updates during scrolling to maintain horizon sync
+        if (mIsVerticalScrollingEnabled && (mIsValidForTouch || mIsValidForScrolling)) return
+
+        // When vertical scrolling is disabled and actively scrolling, only apply pitch changes
+        // to avoid conflicts with touch input controlling yaw
+        if (!mIsVerticalScrollingEnabled && (mIsValidForTouch || mIsValidForScrolling)) {
+            // Only update pitch (horizon), preserve current yaw
+            val currentYaw = mPanorama!!.camera.lookAtRotation?.yaw ?: 0f
+            mPanorama!!.camera.lookAt(this, pitch, currentYaw)
+        } else {
+            // Update both pitch and yaw when not scrolling or when vertical scrolling is enabled
+            mPanorama!!.camera.lookAt(this, pitch, yaw)
+        }
     }
 
     protected fun doSimulatedGyroUpdate() {
-        if (this.isLocked || mIsValidForTouch || mIsValidForScrolling || validForCameraAnimation || mIsValidForTransition || !mHasFirstAccelerometerPitch || !mHasFirstMagneticHeading) return
+        if (this.isLocked || validForCameraAnimation || mIsValidForTransition || !mHasFirstAccelerometerPitch || !mHasFirstMagneticHeading) return
+
+        // When vertical scrolling is enabled, block device orientation during touch/scrolling to prevent conflicts
+        // When vertical scrolling is disabled, allow device pitch updates during scrolling to maintain horizon sync
+        if (mIsVerticalScrollingEnabled && (mIsValidForTouch || mIsValidForScrolling)) return
 
         var step: Float
         var offset = abs((mLastAccelerometerPitch - mAccelerometerPitch).toDouble()).toFloat()
@@ -1064,7 +1091,17 @@ open class PLActivity : AppCompatActivity(), PLIView, SensorEventListener, Gestu
             if (mLastMagneticHeading > mMagneticHeading) mMagneticHeading += step
             else if (mLastMagneticHeading < mMagneticHeading) mMagneticHeading -= step
         }
-        mPanorama!!.camera.lookAt(this, mAccelerometerPitch, mMagneticHeading)
+        
+        // When vertical scrolling is disabled and actively scrolling, only apply pitch changes
+        // to avoid conflicts with touch input controlling yaw
+        if (!mIsVerticalScrollingEnabled && (mIsValidForTouch || mIsValidForScrolling)) {
+            // Only update pitch (horizon), preserve current yaw
+            val currentYaw = mPanorama!!.camera.lookAtRotation?.yaw ?: 0f
+            mPanorama!!.camera.lookAt(this, mAccelerometerPitch, currentYaw)
+        } else {
+            // Update both pitch and yaw when not scrolling or when vertical scrolling is enabled
+            mPanorama!!.camera.lookAt(this, mAccelerometerPitch, mMagneticHeading)
+        }
     }
 
     override fun stopSensorialRotation(): Boolean {
@@ -1386,6 +1423,14 @@ open class PLActivity : AppCompatActivity(), PLIView, SensorEventListener, Gestu
 
     override fun setAcceleratedTouchScrollingEnabled(enabled: Boolean) {
         this.mIsAcceleratedTouchScrollingEnabled = enabled
+    }
+
+    override fun isVerticalScrollingEnabled(): Boolean {
+        return mIsVerticalScrollingEnabled
+    }
+
+    override fun setVerticalScrollingEnabled(enabled: Boolean) {
+        mIsVerticalScrollingEnabled = enabled
     }
 
     /**
